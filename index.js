@@ -467,6 +467,7 @@ class Game {
 
                 if (enemy.health <= 0) {
                     map[y][x] = "tile"
+                    this.enemyCount++
                     this.tilesGrid[y][x].removeClass('tileE').addClass('tile');
                     this.tilesGrid[y][x].find('.health').remove();
                     this.tilesGrid[y][x].data('enemy', null);
