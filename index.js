@@ -74,13 +74,12 @@ class Game {
         ];
     }
 
-    // Сбрасываем состояние игры
-    resetGame() {
-        this.playerHealth = 100;
-        this.playerDamage = 50;
-        this.playX = 0;
-        this.playY = 0;
-        location.reload();
+    getMovementDirection() {
+        if (this.keys['ц'] || this.keys['w'] || this.keys['ArrowUp']) return {deltaY: -1, deltaX: 0};
+        if (this.keys['ы'] || this.keys['s'] || this.keys['ArrowDown']) return {deltaY: 1, deltaX: 0};
+        if (this.keys['ф'] || this.keys['a'] || this.keys['ArrowLeft']) return {deltaY: 0, deltaX: -1};
+        if (this.keys['в'] || this.keys['d'] || this.keys['ArrowRight']) return {deltaY: 0, deltaX: 1};
+        return null;
     }
 
     // Определение метода для генерации карты
@@ -209,53 +208,6 @@ class Game {
         return map;
     }
 
-    //добавление объектов на карту
-    generateObjects(map, numObjects, objectType) {
-        for (let i = 0; i < numObjects; i++) {
-            let objectX, objectY;
-            let attempts = 0;
-            do {
-                objectX = this.getRandomInt(0, this.cols - 1);
-                objectY = this.getRandomInt(0, this.rows - 1);
-                attempts++;
-            } while (map[objectY][objectX] !== "tile" && attempts < 1000);
-
-            if (attempts < 1000) {
-                map[objectY][objectX] = objectType;
-                if (objectType === 'player') {
-                    this.playX = objectX;
-                    this.playY = objectY;
-                }
-
-                // Обновляем тайл после размещения объекта
-                this.updateTile(objectType, objectX, objectY);
-            }
-        }
-    }
-
-    gameLoop(map) {
-        if (this.moveCooldown) return;
-        this.moveCooldown = true;
-
-        // Обработка движения
-        const direction = this.getMovementDirection();
-        if (direction) {
-            this.movePlayer(map, direction.deltaY, direction.deltaX);
-        }
-
-        setTimeout(() => {
-            this.moveCooldown = false;
-        }, 100); // Интервал между движениями
-    }
-
-    getMovementDirection() {
-        if (this.keys['ц'] || this.keys['w'] || this.keys['ArrowUp']) return {deltaY: -1, deltaX: 0};
-        if (this.keys['ы'] || this.keys['s'] || this.keys['ArrowDown']) return {deltaY: 1, deltaX: 0};
-        if (this.keys['ф'] || this.keys['a'] || this.keys['ArrowLeft']) return {deltaY: 0, deltaX: -1};
-        if (this.keys['в'] || this.keys['d'] || this.keys['ArrowRight']) return {deltaY: 0, deltaX: 1};
-        return null;
-    }
-
     initializeMapDOM(map) {
         const field = $(".field");
         field.empty();
@@ -279,6 +231,51 @@ class Game {
             });
             this.tilesGrid.push(tileRow);
         });
+    }
+
+    //добавление объектов на карту
+    generateObjects(map, numObjects, objectType) {
+        for (let i = 0; i < numObjects; i++) {
+            let objectX, objectY;
+            let attempts = 0;
+            do {
+                objectX = this.getRandomInt(0, this.cols - 1);
+                objectY = this.getRandomInt(0, this.rows - 1);
+                attempts++;
+            } while (map[objectY][objectX] !== "tile" && attempts < 1000);
+
+            if (attempts < 1000) {
+                map[objectY][objectX] = objectType;
+                if (objectType === 'player') {
+                    this.playX = objectX;
+                    this.playY = objectY;
+                }
+                if (objectType === 'enemy') {
+                    this.tilesGrid[objectY][objectX].data('enemy', {
+                        health: 100,
+                        itemUnderneath: null  // Изначально под врагом ничего нет
+                    });
+                }
+
+                // Обновляем тайл после размещения объекта
+                this.updateTile(objectType, objectX, objectY);
+            }
+        }
+    }
+
+    gameLoop(map) {
+        if (this.moveCooldown) return;
+        this.moveCooldown = true;
+
+        // Обработка движения
+        const direction = this.getMovementDirection();
+        if (direction) {
+            this.movePlayer(map, direction.deltaY, direction.deltaX);
+        }
+
+        setTimeout(() => {
+            this.moveCooldown = false;
+        }, 100); // Интервал между движениями
     }
 
     updateTileAppearance(tile, cellType) {
@@ -384,7 +381,7 @@ class Game {
         ];
 
         // Создаем копию карты для отслеживания будущих позиций
-        const futureMap = JSON.parse(JSON.stringify(map));
+        const futureMap = structuredClone(map);
         const movedEnemies = new Set();
 
         // Список всех врагов и их новых позиций
@@ -448,11 +445,20 @@ class Game {
         plannedMoves.forEach(move => {
             const {from, to, enemyData} = move;
 
-            // Освобождаем старую позицию
-            map[from.y][from.x] = 'tile';
-            this.updateTile('tile', from.x, from.y);
+            // Восстанавливаем предмет под врагом на старой позиции
+            const itemUnderneath = enemyData.itemUnderneath;
+            map[from.y][from.x] = itemUnderneath || 'tile';
+            this.updateTile(map[from.y][from.x], from.x, from.y);
 
-            // Занимаем новую позицию
+            // Запоминаем предмет на новой позиции
+            const newItem = map[to.y][to.x] === 'potion' || map[to.y][to.x] === 'sword'
+                ? map[to.y][to.x]
+                : null;
+
+            // Обновляем данные врага
+            enemyData.itemUnderneath = newItem;
+
+            // Перемещаем врага
             map[to.y][to.x] = 'enemy';
             this.tilesGrid[to.y][to.x].data('enemy', enemyData);
             this.updateTile('enemy', to.x, to.y);
@@ -481,20 +487,20 @@ class Game {
 
             if (map[y][x] === "enemy") {
                 const tile = this.tilesGrid[y][x];
-                let enemy = tile.data('enemy') || {health: 100};
+                let enemy = tile.data('enemy') || {health: 100, itemUnderneath: null};
 
                 enemy.health -= this.playerDamage;
                 tile.data('enemy', enemy);
                 attacked = true;
 
-                // Обновляем отображение здоровья
                 this.updateTile('enemy', x, y);
 
                 if (enemy.health <= 0) {
-                    map[y][x] = "tile";
+                    // Восстанавливаем предмет при смерти врага
+                    map[y][x] = enemy.itemUnderneath || 'tile';
                     this.enemyCount++;
                     tile.data('enemy', null);
-                    this.updateTile('tile', x, y);
+                    this.updateTile(map[y][x], x, y);
                 }
             }
         });
@@ -522,6 +528,15 @@ class Game {
 
         // Для игрока - не может встать на клетку с врагом
         return tile !== 'enemy';
+    }
+
+    // Сбрасываем состояние игры
+    resetGame() {
+        this.playerHealth = 100;
+        this.playerDamage = 50;
+        this.playX = 0;
+        this.playY = 0;
+        location.reload();
     }
 }
 
